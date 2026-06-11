@@ -80,23 +80,24 @@ async def test_add_position(client: AsyncClient, auth_headers: dict[str, str]) -
 
 @pytest.mark.asyncio
 async def test_get_portfolio_risk(client: AsyncClient, portfolio_with_position: str, auth_headers: dict[str, str]) -> None:
+    from jose import jwt
+
+    from app.config import get_settings
+    from app.routers.risk import _run_task
+
     portfolio_id = portfolio_with_position
     compute = await client.post(f"/portfolios/{portfolio_id}/risk/compute", headers=auth_headers)
     assert compute.status_code == 200
     task_id = compute.json()["task_id"]
 
-    status = "PENDING"
-    last_body: dict = {}
-    for _ in range(120):
-        task = await client.get(f"/tasks/{task_id}")
-        assert task.status_code == 200
-        last_body = task.json()
-        status = last_body["status"]
-        if status in {"SUCCESS", "FAILED"}:
-            break
-        await asyncio.sleep(0.1)
+    token = auth_headers["Authorization"].split(" ", 1)[1]
+    settings = get_settings()
+    user_id = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])["user_id"]
+    await _run_task(task_id, portfolio_id, user_id)
 
-    assert status == "SUCCESS", last_body
+    task = await client.get(f"/tasks/{task_id}")
+    assert task.status_code == 200
+    assert task.json()["status"] == "SUCCESS", task.json()
 
     risk = await client.get(f"/portfolios/{portfolio_id}/risk", headers=auth_headers)
     assert risk.status_code == 200

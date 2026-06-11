@@ -36,30 +36,11 @@ async def _clean_database() -> AsyncGenerator[None, None]:
 
 @pytest.fixture
 async def client() -> AsyncGenerator[AsyncClient, None]:
-    import asyncio
-
-    from starlette.background import BackgroundTasks
-
     from app.main import app
-
-    _orig_add_task = BackgroundTasks.add_task
-
-    def _add_task_run_after_response(self, func, *args, **kwargs):
-        async def _runner() -> None:
-            if asyncio.iscoroutinefunction(func):
-                await func(*args, **kwargs)
-            else:
-                func(*args, **kwargs)
-
-        _orig_add_task(self, _runner)
-
-    BackgroundTasks.add_task = _add_task_run_after_response  # type: ignore[method-assign]
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://testserver") as ac:
         yield ac
-
-    BackgroundTasks.add_task = _orig_add_task  # type: ignore[method-assign]
 
 
 @pytest.fixture
