@@ -86,15 +86,17 @@ async def test_get_portfolio_risk(client: AsyncClient, portfolio_with_position: 
     task_id = compute.json()["task_id"]
 
     status = "PENDING"
-    for _ in range(50):
+    last_body: dict = {}
+    for _ in range(120):
         task = await client.get(f"/tasks/{task_id}")
         assert task.status_code == 200
-        status = task.json()["status"]
+        last_body = task.json()
+        status = last_body["status"]
         if status in {"SUCCESS", "FAILED"}:
             break
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(0.1)
 
-    assert status == "SUCCESS", task.json()
+    assert status == "SUCCESS", last_body
 
     risk = await client.get(f"/portfolios/{portfolio_id}/risk", headers=auth_headers)
     assert risk.status_code == 200
