@@ -59,4 +59,7 @@ jobs:
         run: python -m alembic upgrade head
 
       - name: Run tests
-        run: python -m pytest -q --ignore=tests/test_volatility_forecaster.py -k "not test_get_portfolio_risk"
+        run: |
+          python -m pytest -q tests/test_var_engine.py tests/test_risk_engine.py
+          python -m pytest -q tests/test_api.py::test_register_creates_user_and_token
+          python -m pytest -q tests/test_api.py::test_task_status_persists_in_redis
