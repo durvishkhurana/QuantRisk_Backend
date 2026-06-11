@@ -33,17 +33,21 @@ FastAPI service that ingests equity positions, computes portfolio risk on a sche
 
 ## Configuration
 
-Copy `.env.example` to `.env` and set at minimum:
+**Do not commit `.env` or paste secrets into documentation.**
+
+1. Copy `.env.example` to `.env`.
+2. Fill in your own values for database, Redis, JWT secret, and CORS origins.
+3. Never commit API keys (`ALPHA_VANTAGE_KEY`, `ANTHROPIC_API_KEY`) to the repository.
 
 | Variable | Purpose |
 |----------|---------|
-| `DATABASE_URL` | `postgresql+asyncpg://...` (Render `postgresql://` URLs are normalized automatically) |
+| `DATABASE_URL` | Async Postgres connection string (see `.env.example` for shape) |
 | `REDIS_URL` | Redis connection |
-| `JWT_SECRET_KEY` | Signing secret for access tokens |
+| `JWT_SECRET_KEY` | Long random signing secret |
 | `CELERY_BROKER_URL` / `CELERY_RESULT_BACKEND` | Celery broker and result backend |
-| `FRONTEND_URLS` | Comma-separated CORS origins for the dashboard |
+| `FRONTEND_URLS` | Comma-separated allowed browser origins (CORS) |
 
-Optional: `ALPHA_VANTAGE_KEY`, `ANTHROPIC_API_KEY`.
+Render-managed Postgres URLs using `postgresql://` are normalized to `postgresql+asyncpg://` in application settings.
 
 ## Local development
 
@@ -66,21 +70,20 @@ celery -A app.workers.celery_app.celery_app beat --loglevel=info
 
 ## Testing
 
+Use a dedicated test database and Redis DB index. GitHub Actions supplies CI defaults in `.github/workflows/test.yml`.
+
+Locally:
+
 ```bash
-export DATABASE_URL=postgresql+asyncpg://quantrisk:password@localhost:5432/quantrisk_test
-export REDIS_URL=redis://localhost:6379/15
-export JWT_SECRET_KEY=test-secret
+pip install -r requirements.txt
+# Set DATABASE_URL, REDIS_URL, JWT_SECRET_KEY in .env or your shell (see tests/conftest.py)
 alembic upgrade head
 pytest -q
 ```
 
-CI runs on push to `main` via `.github/workflows/test.yml`.
-
 ## Deployment
 
-Use `render.yaml` in this repository root for a Render Blueprint (web service, Celery worker, Celery beat, Postgres, Redis). Set `FRONTEND_URL` and `FRONTEND_URLS` to your deployed dashboard origin.
-
-See [../md/deploy-without-docker.md](../md/deploy-without-docker.md) for split frontend/backend repos and environment wiring.
+Use `render.yaml` in this repository for a Render Blueprint (web service, Celery worker, Celery beat, Postgres, Redis). Configure `FRONTEND_URL` and `FRONTEND_URLS` in the Render dashboard to match your deployed frontend origin.
 
 ## Project layout
 
@@ -94,12 +97,6 @@ alembic/           # Schema migrations
 tests/             # pytest suite
 scripts/           # benchmarks, demo seeding
 ```
-
-## Related documentation
-
-- [API reference](../md/api_reference.md)
-- [Architecture](../md/architecture.md)
-- [Design decisions](../md/DESIGN_DECISIONS.md)
 
 ## Scope and limitations
 
