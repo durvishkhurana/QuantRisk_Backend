@@ -59,4 +59,8 @@ jobs:
         run: python -m alembic upgrade head
 
       - name: Run tests
-        run: python -m pytest -q --ignore=tests/test_volatility_forecaster.py -m "not integration"
+        run: |
+          python -m pytest -ra --tb=short --ignore=tests/test_volatility_forecaster.py -m "not integration" 2>&1 | tee pytest-output.txt
+      - name: Test summary
+        if: failure()
+        run: tail -n 80 pytest-output.txt >> "$GITHUB_STEP_SUMMARY"

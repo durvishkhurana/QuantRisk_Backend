@@ -119,6 +119,7 @@ async def test_list_alerts_empty(client: AsyncClient, auth_headers: dict[str, st
     assert body["limit"] == 20
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_acknowledge_alert(client: AsyncClient, auth_headers: dict[str, str]) -> None:
     create = await client.post(
@@ -172,6 +173,7 @@ async def test_acknowledge_alert(client: AsyncClient, auth_headers: dict[str, st
     assert listed_after.json()["items"][0]["acknowledged"] is True
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_alert_detail_links_closest_risk(client: AsyncClient, auth_headers: dict[str, str]) -> None:
     create = await client.post(
