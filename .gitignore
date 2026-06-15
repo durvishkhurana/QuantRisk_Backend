@@ -7,3 +7,6 @@ __pycache__
 .mypy_cache
 .ruff_cache
 *.egg-info
+ci-logs.zip
+runs.json
+*.zip
