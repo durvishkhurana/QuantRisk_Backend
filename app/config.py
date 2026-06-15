@@ -1,11 +1,25 @@
+import os
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+_BACKEND_DIR = Path(__file__).resolve().parents[1]
+_REPO_ROOT = _BACKEND_DIR.parent
+
+
+def _env_files() -> tuple[str, ...]:
+    paths: list[Path] = [_REPO_ROOT / ".env", _BACKEND_DIR / ".env", Path(".env")]
+    return tuple(str(p) for p in paths if p.is_file()) or (".env",)
+
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=_env_files(),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     app_name: str = "QuantRisk Engine"
     environment: str = "development"
@@ -34,9 +48,18 @@ class Settings(BaseSettings):
     celery_result_backend: str = Field(default="redis://localhost:6379/1", alias="CELERY_RESULT_BACKEND")
     metrics_port: int = Field(default=9090, alias="METRICS_PORT")
 
+    supabase_url: str | None = Field(default=None, alias="NEXT_PUBLIC_SUPABASE_URL")
+    supabase_publishable_key: str | None = Field(
+        default=None, alias="NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"
+    )
+    supabase_secret_key: str | None = Field(default=None, alias="SUPABASE_SECRET_KEY")
+
     @field_validator("database_url", mode="before")
     @classmethod
     def normalize_database_url(cls, value: object) -> object:
+        supabase_db = os.getenv("SUPABASE_DATABASE_URL")
+        if supabase_db:
+            value = supabase_db
         if isinstance(value, str) and value.startswith("postgresql://"):
             return value.replace("postgresql://", "postgresql+asyncpg://", 1)
         return value

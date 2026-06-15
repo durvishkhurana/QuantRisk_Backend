@@ -41,7 +41,9 @@ FastAPI service that ingests equity positions, computes portfolio risk on a sche
 
 | Variable | Purpose |
 |----------|---------|
-| `DATABASE_URL` | Async Postgres connection string (see `.env.example` for shape) |
+| `DATABASE_URL` | Async Postgres (or set `SUPABASE_DATABASE_URL` for Supabase) |
+| `SUPABASE_DATABASE_URL` | Optional; overrides `DATABASE_URL` (Supabase → Database → URI) |
+| `SUPABASE_SECRET_KEY` | Supabase secret key (Render env only, never frontend) |
 | `REDIS_URL` | Redis connection |
 | `JWT_SECRET_KEY` | Long random signing secret |
 | `CELERY_BROKER_URL` / `CELERY_RESULT_BACKEND` | Celery broker and result backend |
@@ -83,7 +85,22 @@ pytest -q
 
 ## Deployment
 
-Use `render.yaml` in this repository for a Render Blueprint (web service, Celery worker, Celery beat, Postgres, Redis). Configure `FRONTEND_URL` and `FRONTEND_URLS` in the Render dashboard to match your deployed frontend origin.
+**Render (backend):** New → Blueprint → connect this repo → `render.yaml` provisions API, Celery worker, Celery beat, Postgres, and Redis.
+
+**Supabase Postgres instead of Render DB:** set `SUPABASE_DATABASE_URL` on all backend services (from Supabase → Database → URI). Keep Render Redis for Celery, or use [Upstash](https://upstash.com).
+
+**Vercel (frontend):** import the frontend repo; set `VITE_API_URL` to the Render API URL; set `NEXT_PUBLIC_SUPABASE_*` if using the Supabase client.
+
+On the API service set `FRONTEND_URL` and `FRONTEND_URLS` to your Vercel origin.
+
+Seed data (after DB is reachable):
+
+```bash
+python -m alembic upgrade head
+python scripts/seed_test_data.py
+```
+
+Test logins: `demo@quantrisk.com` / `QuantRisk2025!`, `analyst@quantrisk.com` / `Analyst2025!`.
 
 ## Project layout
 

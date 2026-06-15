@@ -10,6 +10,7 @@ def _synthetic_returns(n: int, seed: int, vol_scale: float = 1.0) -> pd.Series:
     return pd.Series(rng.normal(0, 0.01 * vol_scale, n))
 
 
+@pytest.mark.slow
 def test_vol_forecaster_output_shape():
     returns = _synthetic_returns(252, seed=42)
     forecaster = VolatilityForecaster(returns, ticker="TEST")
