@@ -97,6 +97,27 @@ def market_mocks(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("app.routers.portfolios.celery_app.send_task", _noop_send_task)
     monkeypatch.setattr("app.routers.risk.celery_app.send_task", _noop_send_task)
 
+    class _FastVolForecaster:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def evaluate_and_forecast(self, historical_var_95: float = 0.0):
+            from types import SimpleNamespace
+
+            metrics = SimpleNamespace(
+                predicted_vol=0.2,
+                garch_vol=0.21,
+                lstm_mae=0.01,
+                garch_mae=0.02,
+                lstm_rmse=0.01,
+                garch_rmse=0.02,
+                direction_accuracy=0.55,
+                vol_regime="NORMAL",
+            )
+            return SimpleNamespace(metrics=metrics, adjusted_var_95=historical_var_95)
+
+    monkeypatch.setattr("app.services.risk.VolatilityForecaster", _FastVolForecaster)
+
 
 @pytest.fixture
 async def auth_headers(client: AsyncClient) -> dict[str, str]:

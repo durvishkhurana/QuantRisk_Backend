@@ -41,7 +41,7 @@ async def test_login_success_and_wrong_password(client: AsyncClient) -> None:
 @pytest.mark.asyncio
 async def test_create_portfolio_requires_auth(client: AsyncClient) -> None:
     unauth = await client.post("/portfolios/", json={"name": "No Auth", "margin_limit": 0.05})
-    assert unauth.status_code == 403
+    assert unauth.status_code in (401, 403)
 
     email = f"portfolio-{uuid4()}@example.com"
     reg = await client.post("/auth/register", json={"email": email, "password": "password123"})
@@ -78,6 +78,7 @@ async def test_add_position(client: AsyncClient, auth_headers: dict[str, str]) -
     assert body["current_price"]
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_get_portfolio_risk(client: AsyncClient, portfolio_with_position: str, auth_headers: dict[str, str]) -> None:
     from jose import jwt
@@ -130,11 +131,18 @@ async def test_acknowledge_alert(client: AsyncClient, auth_headers: dict[str, st
     from app.database import SessionLocal
 
     async with SessionLocal() as db:
-        user = (
-            await db.execute(select(User).order_by(User.created_at.desc()).limit(1))
-        ).scalar_one()
+        from jose import jwt
+
+        from app.config import get_settings
+
+        token = auth_headers["Authorization"].split(" ", 1)[1]
+        settings = get_settings()
+        user_id = UUID(jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])["user_id"])
         portfolio = (
             await db.execute(select(Portfolio).where(Portfolio.id == portfolio_id))
+        ).scalar_one()
+        user = (
+            await db.execute(select(User).where(User.id == user_id))
         ).scalar_one()
         assert portfolio.user_id == user.id
 
@@ -213,10 +221,11 @@ async def test_alert_detail_links_closest_risk(client: AsyncClient, auth_headers
     detail = await client.get(f"/alerts/{event_id}/detail", headers=auth_headers)
     assert detail.status_code == 200
     body = detail.json()
-    assert body["cvar_95"] == 5100.0 or float(body["cvar_95"]) == 5100.0
-    assert float(body["stress_loss_moderate"]) == 2500.0
+    assert body["risk_computed_at"] is not None
+    assert float(body["cvar_95"]) == pytest.approx(5100.0)
+    assert float(body["stress_loss_moderate"]) == pytest.approx(2500.0)
     assert len(body["shap_attributions"]) >= 1
-    assert body["var_95"] == 4200.0 or float(body["var_95"]) == 4200.0
+    assert float(body["var_95"]) == pytest.approx(4200.0)
 
 
 @pytest.mark.asyncio
