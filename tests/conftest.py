@@ -31,6 +31,7 @@ async def _clean_database() -> AsyncGenerator[None, None]:
 
     async with engine.begin() as conn:
         await conn.execute(text("TRUNCATE users RESTART IDENTITY CASCADE"))
+        await conn.execute(text("TRUNCATE price_snapshots RESTART IDENTITY"))
     yield
 
 
