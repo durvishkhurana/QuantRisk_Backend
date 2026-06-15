@@ -1,8 +1,9 @@
 import os
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import quote, urlparse
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -54,6 +55,9 @@ class Settings(BaseSettings):
     )
     supabase_secret_key: str | None = Field(default=None, alias="SUPABASE_SECRET_KEY")
 
+    upstash_redis_rest_url: str | None = Field(default=None, alias="UPSTASH_REDIS_REST_URL")
+    upstash_redis_rest_token: str | None = Field(default=None, alias="UPSTASH_REDIS_REST_TOKEN")
+
     @field_validator("database_url", mode="before")
     @classmethod
     def normalize_database_url(cls, value: object) -> object:
@@ -63,6 +67,28 @@ class Settings(BaseSettings):
         if isinstance(value, str) and value.startswith("postgresql://"):
             return value.replace("postgresql://", "postgresql+asyncpg://", 1)
         return value
+
+    @staticmethod
+    def _upstash_redis_url(rest_url: str, rest_token: str) -> str | None:
+        host = urlparse(rest_url.strip()).hostname
+        if not host:
+            return None
+        token = rest_token.strip().strip('"').strip("'")
+        if not token:
+            return None
+        return f"rediss://default:{quote(token, safe='')}@{host}:6379"
+
+    @model_validator(mode="after")
+    def apply_upstash_redis(self) -> "Settings":
+        if not (self.upstash_redis_rest_url and self.upstash_redis_rest_token):
+            return self
+        derived = self._upstash_redis_url(self.upstash_redis_rest_url, self.upstash_redis_rest_token)
+        if not derived:
+            return self
+        object.__setattr__(self, "redis_url", derived)
+        object.__setattr__(self, "celery_broker_url", derived)
+        object.__setattr__(self, "celery_result_backend", derived)
+        return self
 
     def cors_origins(self) -> list[str]:
         if self.frontend_urls:
