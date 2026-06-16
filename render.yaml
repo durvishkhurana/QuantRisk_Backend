@@ -3,7 +3,7 @@ services:
     name: quantrisk-backend
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    startCommand: PYTHONPATH=. alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
     plan: starter
     healthCheckPath: /health
     envVars:

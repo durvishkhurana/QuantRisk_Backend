@@ -85,7 +85,17 @@ pytest -q
 
 ## Deployment
 
-**Render (backend):** New → Blueprint → connect this repo → `render.yaml` provisions API, Celery worker, Celery beat, Postgres, and Redis.
+**Render (backend):** New → Web Service → connect this repo.
+
+**Python version:** Render defaults to 3.14, which breaks pinned `pandas`/`numpy` builds. Set **Environment → `PYTHON_VERSION`** = `3.12.12` (or rely on repo `.python-version` = `3.12`).
+
+**Start command:**
+
+```bash
+PYTHONPATH=. alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+```
+
+**Build command:** `pip install -r requirements.txt`
 
 **Supabase Postgres instead of Render DB:** set `SUPABASE_DATABASE_URL` on all backend services (from Supabase → Database → URI). Keep Render Redis for Celery, or use [Upstash](https://upstash.com).
 
