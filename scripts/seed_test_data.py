@@ -46,7 +46,8 @@ async def _get_or_create_user(db, email: str, password: str) -> User:
     result = await db.execute(select(User).where(User.email == email.lower()))
     user = result.scalar_one_or_none()
     if user:
-        print(f"  User already exists: {email}")
+        user.password_hash = hash_password(password)
+        print(f"  User already exists (password reset): {email}")
         return user
     user = User(email=email.lower(), password_hash=hash_password(password))
     db.add(user)
