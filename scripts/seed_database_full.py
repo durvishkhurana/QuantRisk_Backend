@@ -404,6 +404,32 @@ async def _persist_risk_seed(db, portfolio: Portfolio) -> RiskComputation | None
             )
         )
     await db.flush()
+
+    from app.services.nlp_report_service import generate_risk_narrative
+
+    shap_map = {ticker: float(contribution) for ticker, contribution in (row.shap_json or {}).items()}
+    shap_items = sorted(shap_map.items(), key=lambda x: x[1], reverse=True)
+    payload = {
+        "var_95": float(row.var_95),
+        "cvar_95": float(row.cvar_95),
+        "portfolio_value": float(row.portfolio_value),
+        "margin_utilization": float(row.margin_utilization),
+        "margin_status": row.margin_status,
+        "shap_attribution": [
+            {"ticker": t, "contribution": v, "pct_of_var": (v / float(row.var_95) * 100) if float(row.var_95) else 0}
+            for t, v in shap_items
+        ],
+        "stress_tests": {
+            "severe": {
+                "pct": float(row.stress_severe) / float(row.portfolio_value) * 100 if float(row.portfolio_value) else 0,
+            },
+        },
+        "monte_carlo": {"var_95": float(row.mc_var_95)} if row.mc_var_95 is not None else None,
+    }
+    narrative = await generate_risk_narrative(payload)
+    row.risk_narrative = narrative.text
+    await db.flush()
+
     print(
         f"    Risk: value=${float(row.portfolio_value):,.0f} "
         f"VaR95=${float(row.var_95):,.0f} status={row.margin_status}"

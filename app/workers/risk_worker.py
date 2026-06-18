@@ -53,6 +53,6 @@ async def _generate_narrative(risk_computation_id: str) -> dict:
         shap_map = await _get_shap_map_for_row(db, row)
         mapped = _map_risk_row_from_shap(row, shap_map)
         narrative = await generate_risk_narrative(mapped.model_dump(mode="json"))
-        row.risk_narrative = narrative
+        row.risk_narrative = narrative.text
         await db.commit()
         return {"status": "ok", "risk_computation_id": risk_computation_id}

@@ -39,6 +39,8 @@ FastAPI service that ingests equity positions, computes portfolio risk on a sche
 2. Fill in your own values for database, Redis, JWT secret, and CORS origins.
 3. Never commit API keys (`ALPHA_VANTAGE_KEY`, `ANTHROPIC_API_KEY`) to the repository.
 
+**Risk narrative:** With `ANTHROPIC_API_KEY` on Render, summaries use Claude Haiku. Without it, the API builds a rule-based narrative from VaR, SHAP, and stress metrics (no xAI/Grok integration).
+
 | Variable | Purpose |
 |----------|---------|
 | `DATABASE_URL` | Async Postgres (or set `SUPABASE_DATABASE_URL` for Supabase) |

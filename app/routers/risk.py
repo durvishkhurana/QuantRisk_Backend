@@ -50,6 +50,8 @@ from app.services.optimizer_service import run_portfolio_optimizer
 
 from app.services.portfolio_service import compute_position_values, compute_portfolio_value, compute_weights
 
+from app.services.nlp_report_service import generate_risk_narrative
+
 from app.services.redis_client import publish_json
 
 from app.services.return_matrix import build_returns_matrix
@@ -254,6 +256,21 @@ async def _get_owned_portfolio(db: AsyncSession, portfolio_id: str, user_id: str
 
 
 
+async def _refresh_risk_narrative(db: AsyncSession, row: RiskComputation):
+    shap_map = await _get_shap_map_for_row(db, row)
+    forecast_rows = await get_latest_forecasts_for_portfolio(db, row.portfolio_id)
+    vol_out = _forecast_rows_to_out(forecast_rows) if forecast_rows else None
+    mapped = _map_risk_row_from_shap(row, shap_map, vol_out)
+    result = await generate_risk_narrative(mapped.model_dump(mode="json"))
+    row.risk_narrative = result.text
+    await db.commit()
+    await db.refresh(row)
+    return result
+
+
+
+
+
 async def _persist_computation(db: AsyncSession, portfolio: Portfolio, triggered_by: str = "manual") -> RiskComputation:
 
     res = await compute_portfolio_risk(db, portfolio)
@@ -341,6 +358,8 @@ async def _persist_computation(db: AsyncSession, portfolio: Portfolio, triggered
         )
 
     await db.commit()
+
+    await _refresh_risk_narrative(db, row)
 
     try:
 
@@ -494,6 +513,10 @@ async def get_latest_risk(
     if not row:
 
         raise HTTPException(status_code=404, detail="No computation found for portfolio")
+
+    if not row.risk_narrative:
+
+        await _refresh_risk_narrative(db, row)
 
     shap_map = await _get_shap_map_for_row(db, row)
 
@@ -740,6 +763,26 @@ async def get_backtest(
 
 
 
+
+
+@router.post("/narrative")
+async def regenerate_narrative(
+    portfolio_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    await _get_owned_portfolio(db, portfolio_id, str(user.id))
+    result = await db.execute(
+        select(RiskComputation)
+        .where(RiskComputation.portfolio_id == portfolio_id)
+        .order_by(RiskComputation.computed_at.desc())
+        .limit(1)
+    )
+    row = result.scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="No computation found for portfolio")
+    narrative = await _refresh_risk_narrative(db, row)
+    return {"risk_narrative": row.risk_narrative, "source": narrative.source}
 
 
 @router.post("/compute")
