@@ -1,3 +1,4 @@
+import asyncio
 from datetime import date
 from decimal import Decimal
 import os
@@ -53,6 +54,14 @@ async def get_latest_price(ticker: str) -> Decimal:
     out = Decimal(str(round(float(price), 4)))
     await cache_set_json(f"price:{ticker}", {"price": float(out)}, ttl_seconds=60)
     return out
+
+
+async def get_latest_price_with_fallback(ticker: str, fallback: Decimal, *, timeout_seconds: float = 12.0) -> Decimal:
+    """Resolve live price when possible; never fail the caller (uses fallback on timeout/errors)."""
+    try:
+        return await asyncio.wait_for(get_latest_price(ticker), timeout=timeout_seconds)
+    except Exception:  # noqa: BLE001
+        return fallback
 
 
 async def get_sector(ticker: str) -> str | None:

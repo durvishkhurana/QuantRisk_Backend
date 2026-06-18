@@ -47,9 +47,9 @@ services:
           name: quantrisk-redis
           property: connectionString
       - key: FRONTEND_URL
-        sync: false
+        value: https://quant-risk-frontend.vercel.app
       - key: FRONTEND_URLS
-        sync: false
+        value: https://quant-risk-frontend.vercel.app,http://localhost:5173
 
   - type: worker
     name: quantrisk-celery-worker

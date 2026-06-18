@@ -14,13 +14,19 @@ async def get_redis() -> Redis:
 
 
 async def cache_set_json(key: str, value: dict, ttl_seconds: int) -> None:
-    redis = await get_redis()
-    await redis.set(key, json.dumps(value), ex=ttl_seconds)
+    try:
+        redis = await get_redis()
+        await redis.set(key, json.dumps(value), ex=ttl_seconds)
+    except Exception:  # noqa: BLE001
+        return
 
 
 async def cache_get_json(key: str) -> dict | None:
-    redis = await get_redis()
-    raw = await redis.get(key)
+    try:
+        redis = await get_redis()
+        raw = await redis.get(key)
+    except Exception:  # noqa: BLE001
+        return None
     if not raw:
         return None
     try:

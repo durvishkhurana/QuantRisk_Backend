@@ -93,11 +93,20 @@ class Settings(BaseSettings):
         return self
 
     def cors_origins(self) -> list[str]:
+        origins: list[str] = []
+        if self.frontend_url.strip():
+            origins.append(self.frontend_url.strip())
         if self.frontend_urls:
-            values = [v.strip() for v in self.frontend_urls.split(",") if v.strip()]
-            if values:
-                return values
-        return [self.frontend_url]
+            origins.extend(v.strip() for v in self.frontend_urls.split(",") if v.strip())
+        if self.environment.lower() == "production":
+            origins.append("https://quant-risk-frontend.vercel.app")
+        seen: set[str] = set()
+        deduped: list[str] = []
+        for origin in origins:
+            if origin not in seen:
+                seen.add(origin)
+                deduped.append(origin)
+        return deduped or ["http://localhost:5173"]
 
 
 @lru_cache

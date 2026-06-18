@@ -16,7 +16,7 @@ from app.schemas import (
     PositionPatchIn,
 )
 import numpy as np
-from app.services.market_data import backfill_history, get_latest_price, get_sector
+from app.services.market_data import backfill_history, get_latest_price, get_latest_price_with_fallback, get_sector
 from app.workers.celery_app import celery_app
 
 router = APIRouter(prefix="/portfolios", tags=["portfolios"])
@@ -129,7 +129,8 @@ async def get_portfolio(
     position_rows = []
     total = Decimal("0")
     for pos in positions:
-        price = await get_latest_price(pos.ticker)
+        purchase = Decimal(pos.purchase_price)
+        price = await get_latest_price_with_fallback(pos.ticker, purchase)
         market = price * Decimal(pos.quantity)
         total += market
         position_rows.append(

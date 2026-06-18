@@ -11,14 +11,27 @@ from app.routers import alerts, auth, portfolios, risk, websocket
 settings = get_settings()
 app = FastAPI(title=settings.app_name, docs_url="/api/docs", redoc_url="/api/redoc", openapi_url="/api/openapi.json")
 
+_allowed_origins = settings.cors_origins()
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins(),
+    allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 app.add_middleware(MetricsMiddleware)
+
+
+@app.middleware("http")
+async def ensure_cors_on_error_responses(request: Request, call_next):
+    """Some proxy/error paths omit CORS; mirror allowed Origin on every response."""
+    response = await call_next(request)
+    origin = request.headers.get("origin")
+    if origin and origin in _allowed_origins and "access-control-allow-origin" not in response.headers:
+        response.headers["access-control-allow-origin"] = origin
+        response.headers["access-control-allow-credentials"] = "true"
+    return response
 
 
 @app.on_event("startup")
