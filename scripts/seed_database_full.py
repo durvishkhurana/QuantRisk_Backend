@@ -10,7 +10,7 @@ Run from backend/ (after `alembic upgrade head`):
   python scripts/seed_database_full.py --force-prices
   python scripts/seed_database_full.py --skip-risk
 
-Log in at /auth with demo@quantrisk.com / QuantRisk2025!
+Log in at /auth with demo@quantrisk.com / QuantRisk2025! or tester@quantrisk.com / Tester2025!
 """
 from __future__ import annotations
 
@@ -44,6 +44,7 @@ get_settings.cache_clear()
 TEST_USERS: list[tuple[str, str, str]] = [
     ("demo@quantrisk.com", "QuantRisk2025!", "Primary demo — full portfolio + risk"),
     ("analyst@quantrisk.com", "Analyst2025!", "Secondary — smaller tech-heavy book"),
+    ("tester@quantrisk.com", "Tester2025!", "Showcase — five themed portfolios with live-style data"),
 ]
 
 # ticker, quantity, purchase_price
@@ -73,6 +74,60 @@ DEMO_PORTFOLIO_SPECS: list[tuple[str, list[tuple[str, float, float]]]] = [
     ),
 ]
 
+# Five portfolios for tester@quantrisk.com (ticker, quantity, purchase_price)
+TESTER_PORTFOLIO_SPECS: list[tuple[str, list[tuple[str, float, float]]]] = [
+    (
+        "Mega Cap Technology",
+        [
+            ("AAPL", 150, 178.00),
+            ("MSFT", 90, 380.00),
+            ("GOOGL", 60, 165.00),
+            ("META", 45, 480.00),
+            ("NVDA", 120, 95.00),
+        ],
+    ),
+    (
+        "Global Financials",
+        [
+            ("JPM", 200, 185.00),
+            ("BAC", 400, 32.00),
+            ("GS", 75, 450.00),
+            ("MS", 110, 88.00),
+            ("V", 85, 270.00),
+        ],
+    ),
+    (
+        "Consumer & Retail",
+        [
+            ("AMZN", 80, 165.00),
+            ("WMT", 120, 68.00),
+            ("COST", 35, 720.00),
+            ("HD", 55, 340.00),
+            ("MCD", 90, 285.00),
+        ],
+    ),
+    (
+        "Healthcare Defensive",
+        [
+            ("JNJ", 140, 155.00),
+            ("UNH", 50, 520.00),
+            ("PFE", 300, 28.00),
+            ("ABBV", 70, 165.00),
+            ("MRK", 95, 115.00),
+        ],
+    ),
+    (
+        "ETF Core Allocation",
+        [
+            ("SPY", 180, 480.00),
+            ("QQQ", 100, 420.00),
+            ("IWM", 150, 195.00),
+            ("VTI", 130, 240.00),
+            ("AGG", 220, 98.00),
+        ],
+    ),
+]
+
 SECTOR_BY_TICKER: dict[str, str] = {
     "AAPL": "Technology",
     "MSFT": "Technology",
@@ -84,6 +139,23 @@ SECTOR_BY_TICKER: dict[str, str] = {
     "JPM": "Financials",
     "GS": "Financials",
     "SPY": "ETF",
+    "BAC": "Financials",
+    "MS": "Financials",
+    "V": "Financials",
+    "AMZN": "Consumer Cyclical",
+    "WMT": "Consumer Defensive",
+    "COST": "Consumer Defensive",
+    "HD": "Consumer Cyclical",
+    "MCD": "Consumer Cyclical",
+    "JNJ": "Healthcare",
+    "UNH": "Healthcare",
+    "PFE": "Healthcare",
+    "ABBV": "Healthcare",
+    "MRK": "Healthcare",
+    "QQQ": "ETF",
+    "IWM": "ETF",
+    "VTI": "ETF",
+    "AGG": "ETF",
 }
 
 MIN_HISTORY_ROWS = 200
@@ -101,6 +173,23 @@ REFERENCE_CLOSE: dict[str, float] = {
     "JPM": 210.0,
     "GS": 520.0,
     "SPY": 550.0,
+    "BAC": 38.0,
+    "MS": 105.0,
+    "V": 310.0,
+    "AMZN": 195.0,
+    "WMT": 75.0,
+    "COST": 920.0,
+    "HD": 390.0,
+    "MCD": 295.0,
+    "JNJ": 158.0,
+    "UNH": 580.0,
+    "PFE": 26.0,
+    "ABBV": 178.0,
+    "MRK": 125.0,
+    "QQQ": 510.0,
+    "IWM": 220.0,
+    "VTI": 280.0,
+    "AGG": 98.0,
 }
 
 
@@ -387,11 +476,14 @@ async def run_seed(*, force_prices: bool, skip_risk: bool, synthetic_only: bool)
 
         demo_user = users_by_email["demo@quantrisk.com"]
         analyst_user = users_by_email["analyst@quantrisk.com"]
+        tester_user = users_by_email["tester@quantrisk.com"]
 
         portfolio_jobs: list[tuple[User, str, list[tuple[str, float, float]]]] = [
             (demo_user, DEMO_PORTFOLIO_SPECS[0][0], DEMO_PORTFOLIO_SPECS[0][1]),
             (analyst_user, DEMO_PORTFOLIO_SPECS[1][0], DEMO_PORTFOLIO_SPECS[1][1]),
         ]
+        for name, positions in TESTER_PORTFOLIO_SPECS:
+            portfolio_jobs.append((tester_user, name, positions))
 
         portfolios: list[Portfolio] = []
         for user, name, positions in portfolio_jobs:
@@ -432,7 +524,7 @@ async def run_seed(*, force_prices: bool, skip_risk: bool, synthetic_only: bool)
     print("\nDone. Test logins (JWT at /auth):")
     for email, password, _ in TEST_USERS:
         print(f"  {email}  /  {password}")
-    print("\nOpen the dashboard — demo user should see 'Demo Portfolio' with value and VaR.")
+    print("\nOpen the dashboard — tester@quantrisk.com has five portfolios with VaR and charts.")
 
 
 def main() -> None:

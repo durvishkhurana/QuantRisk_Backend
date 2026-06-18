@@ -112,9 +112,10 @@ Seed data (after DB is reachable):
 ```bash
 python -m alembic upgrade head
 python scripts/seed_test_data.py
+python scripts/seed_database_full.py   # prices, risk rows, and full tester showcase
 ```
 
-Test logins: `demo@quantrisk.com` / `QuantRisk2025!`, `analyst@quantrisk.com` / `Analyst2025!`.
+Test logins: `demo@quantrisk.com` / `QuantRisk2025!`, `analyst@quantrisk.com` / `Analyst2025!`, `tester@quantrisk.com` / `Tester2025!` (five portfolios after full seed).
 
 ## Project layout
 
