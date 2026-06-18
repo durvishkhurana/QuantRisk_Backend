@@ -80,6 +80,8 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def apply_upstash_redis(self) -> "Settings":
+        if os.getenv("REDIS_URL", "").strip():
+            return self
         if not (self.upstash_redis_rest_url and self.upstash_redis_rest_token):
             return self
         derived = self._upstash_redis_url(self.upstash_redis_rest_url, self.upstash_redis_rest_token)

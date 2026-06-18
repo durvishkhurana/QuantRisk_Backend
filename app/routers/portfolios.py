@@ -277,7 +277,13 @@ async def list_portfolios(db: AsyncSession = Depends(get_db), user: User = Depen
                 margin_limit=Decimal(p.margin_limit),
                 positions_count=pos_count,
                 total_value=Decimal(latest.portfolio_value) if latest else Decimal("0"),
-                latest_risk={"margin_status": latest.margin_status, "var_95": float(latest.var_95)} if latest else None,
+                latest_risk={
+                    "margin_status": latest.margin_status,
+                    "var_95": float(latest.var_95),
+                    "margin_utilization": float(latest.margin_utilization),
+                }
+                if latest
+                else None,
             )
         )
     return out

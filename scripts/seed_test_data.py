@@ -4,6 +4,9 @@ Create test users and a demo portfolio in PostgreSQL.
 Run from backend/ (after alembic upgrade head):
   python scripts/seed_test_data.py
 
+For portfolios, stock positions, price history, and risk rows (full UI):
+  python scripts/seed_database_full.py
+
 Uses DATABASE_URL or SUPABASE_DATABASE_URL from the repo root .env.
 """
 from __future__ import annotations
@@ -61,30 +64,42 @@ async def _seed_demo_portfolio(db, user: User) -> str | None:
         select(Portfolio).where(Portfolio.user_id == user.id, Portfolio.name == DEMO_PORTFOLIO_NAME)
     )
     portfolio = result.scalar_one_or_none()
-    if portfolio:
+    if not portfolio:
+        portfolio = Portfolio(
+            user_id=user.id,
+            name=DEMO_PORTFOLIO_NAME,
+            margin_limit=Decimal("0.05"),
+            is_active=True,
+        )
+        db.add(portfolio)
+        await db.flush()
+        print(f"  Created portfolio {DEMO_PORTFOLIO_NAME} ({portfolio.id})")
+    else:
         print(f"  Portfolio already exists: {DEMO_PORTFOLIO_NAME} ({portfolio.id})")
-        return str(portfolio.id)
-
-    portfolio = Portfolio(
-        user_id=user.id,
-        name=DEMO_PORTFOLIO_NAME,
-        margin_limit=Decimal("0.05"),
-        is_active=True,
-    )
-    db.add(portfolio)
-    await db.flush()
 
     for ticker, qty, px in DEMO_POSITIONS:
-        db.add(
-            Position(
-                portfolio_id=portfolio.id,
-                ticker=ticker,
-                quantity=Decimal(str(qty)),
-                purchase_price=Decimal(str(px)),
-                sector="Technology" if ticker in {"AAPL", "MSFT", "GOOGL"} else "Financials",
-            )
+        ticker = ticker.upper()
+        existing = await db.execute(
+            select(Position).where(Position.portfolio_id == portfolio.id, Position.ticker == ticker)
         )
-    print(f"  Created portfolio {DEMO_PORTFOLIO_NAME} with {len(DEMO_POSITIONS)} positions")
+        pos = existing.scalar_one_or_none()
+        sector = "Technology" if ticker in {"AAPL", "MSFT", "GOOGL"} else "Financials"
+        if pos:
+            pos.quantity = Decimal(str(qty))
+            pos.purchase_price = Decimal(str(px))
+            pos.sector = sector
+        else:
+            db.add(
+                Position(
+                    portfolio_id=portfolio.id,
+                    ticker=ticker,
+                    quantity=Decimal(str(qty)),
+                    purchase_price=Decimal(str(px)),
+                    sector=sector,
+                )
+            )
+    print(f"  Ensured {len(DEMO_POSITIONS)} positions in {DEMO_PORTFOLIO_NAME}")
+    print("  Tip: run scripts/seed_database_full.py for prices + risk metrics on the dashboard.")
     return str(portfolio.id)
 
 

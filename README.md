@@ -42,7 +42,7 @@ FastAPI service that ingests equity positions, computes portfolio risk on a sche
 | Variable | Purpose |
 |----------|---------|
 | `DATABASE_URL` | Async Postgres (or set `SUPABASE_DATABASE_URL` for Supabase) |
-| `SUPABASE_DATABASE_URL` | Optional; overrides `DATABASE_URL` (Supabase → Database → URI) |
+| `SUPABASE_DATABASE_URL` | Overrides `DATABASE_URL`. On **Render/Vercel**, use Supabase **connection pooler** (port **6543**), not direct `db.*.supabase.co:5432`. |
 | `SUPABASE_SECRET_KEY` | Supabase secret key (Render env only, never frontend) |
 | `REDIS_URL` | Redis connection |
 | `JWT_SECRET_KEY` | Long random signing secret |
@@ -97,7 +97,11 @@ PYTHONPATH=. alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 
 
 **Build command:** `pip install -r requirements.txt`
 
-**Supabase Postgres instead of Render DB:** set `SUPABASE_DATABASE_URL` on all backend services (from Supabase → Database → URI). Keep Render Redis for Celery, or use [Upstash](https://upstash.com).
+**Supabase Postgres instead of Render DB:** set `SUPABASE_DATABASE_URL` on all backend services.
+
+**Render + Supabase:** In [Supabase](https://supabase.com/dashboard) → **Project Settings → Database → Connection string**, choose **URI** and turn on **Use connection pooling** (Session mode, port **6543**). Paste that into `SUPABASE_DATABASE_URL` on Render. The direct host `db.<ref>.supabase.co:5432` often fails from Render with `Network is unreachable` (IPv6). URL-encode special characters in the password (e.g. `.` → `%2E`).
+
+Keep **Upstash** (or Render) Redis for Celery.
 
 **Vercel (frontend):** import the frontend repo; set `VITE_API_URL` to the Render API URL; set `NEXT_PUBLIC_SUPABASE_*` if using the Supabase client.
 

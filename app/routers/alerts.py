@@ -281,6 +281,59 @@ async def list_alerts(
     return AlertsListResponse(items=items, total=total, limit=limit, offset=offset)
 
 
+@router.get("/summary")
+async def alerts_summary(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> list[dict]:
+    portfolios = (await db.execute(select(Portfolio).where(Portfolio.user_id == user.id))).scalars().all()
+    summary: list[dict] = []
+    for p in portfolios:
+        event = (
+            await db.execute(
+                select(MarginEvent).where(MarginEvent.portfolio_id == p.id).order_by(MarginEvent.triggered_at.desc()).limit(1)
+            )
+        ).scalar_one_or_none()
+        if event:
+            summary.append(
+                {
+                    "portfolio_id": str(p.id),
+                    "portfolio_name": p.name,
+                    "event_type": event.event_type,
+                    "triggered_at": event.triggered_at,
+                    "utilization": float(event.margin_utilization),
+                }
+            )
+    return summary
+
+
+@router.get("/portfolios/{portfolio_id}")
+async def portfolio_alerts(
+    portfolio_id: str,
+    limit: int = 50,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[dict]:
+    p = (
+        await db.execute(select(Portfolio).where(Portfolio.id == portfolio_id, Portfolio.user_id == user.id).limit(1))
+    ).scalar_one_or_none()
+    if not p:
+        return []
+    events = (
+        await db.execute(
+            select(MarginEvent).where(MarginEvent.portfolio_id == portfolio_id).order_by(MarginEvent.triggered_at.desc()).limit(limit)
+        )
+    ).scalars().all()
+    return [
+        {
+            "id": str(e.id),
+            "event_type": e.event_type,
+            "triggered_at": e.triggered_at,
+            "var_95": float(e.var_95),
+            "margin_limit": float(e.margin_limit),
+            "margin_utilization": float(e.margin_utilization),
+        }
+        for e in events
+    ]
+
+
 @router.get("/{event_id}/detail", response_model=AlertDetailOut)
 async def alert_detail(
     event_id: UUID,
@@ -354,59 +407,6 @@ async def acknowledge_alert(
         await db.commit()
         await db.refresh(event)
     return _serialize_event(event, portfolio_name)
-
-
-@router.get("/summary")
-async def alerts_summary(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> list[dict]:
-    portfolios = (await db.execute(select(Portfolio).where(Portfolio.user_id == user.id))).scalars().all()
-    summary: list[dict] = []
-    for p in portfolios:
-        event = (
-            await db.execute(
-                select(MarginEvent).where(MarginEvent.portfolio_id == p.id).order_by(MarginEvent.triggered_at.desc()).limit(1)
-            )
-        ).scalar_one_or_none()
-        if event:
-            summary.append(
-                {
-                    "portfolio_id": str(p.id),
-                    "portfolio_name": p.name,
-                    "event_type": event.event_type,
-                    "triggered_at": event.triggered_at,
-                    "utilization": float(event.margin_utilization),
-                }
-            )
-    return summary
-
-
-@router.get("/portfolios/{portfolio_id}")
-async def portfolio_alerts(
-    portfolio_id: str,
-    limit: int = 50,
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
-) -> list[dict]:
-    p = (
-        await db.execute(select(Portfolio).where(Portfolio.id == portfolio_id, Portfolio.user_id == user.id).limit(1))
-    ).scalar_one_or_none()
-    if not p:
-        return []
-    events = (
-        await db.execute(
-            select(MarginEvent).where(MarginEvent.portfolio_id == portfolio_id).order_by(MarginEvent.triggered_at.desc()).limit(limit)
-        )
-    ).scalars().all()
-    return [
-        {
-            "id": str(e.id),
-            "event_type": e.event_type,
-            "triggered_at": e.triggered_at,
-            "var_95": float(e.var_95),
-            "margin_limit": float(e.margin_limit),
-            "margin_utilization": float(e.margin_utilization),
-        }
-        for e in events
-    ]
 
 
 @portfolio_alert_router.get("")
