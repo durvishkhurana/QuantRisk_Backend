@@ -32,6 +32,12 @@ class PortfolioCreateIn(BaseModel):
     margin_limit: Decimal = Field(default=Decimal("0.05"))
 
 
+class PortfolioPatchIn(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    margin_limit: Decimal | None = Field(default=None)
+
+
+
 class PortfolioOut(BaseModel):
     portfolio_id: uuid.UUID
     name: str

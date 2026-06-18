@@ -8,6 +8,7 @@ from app.models import Portfolio, Position, RiskComputation, User
 from app.schemas import (
     AggregateRiskResponse,
     PortfolioCreateIn,
+    PortfolioPatchIn,
     PortfolioOut,
     PortfolioRiskBreakdown,
     PositionCreateIn,
@@ -160,6 +161,46 @@ async def delete_portfolio(
     portfolio = await _get_owned_portfolio(db, portfolio_id, str(user.id))
     await db.delete(portfolio)
     await db.commit()
+
+
+@router.patch("/{portfolio_id}", response_model=PortfolioOut)
+async def patch_portfolio(
+    portfolio_id: str,
+    payload: PortfolioPatchIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> PortfolioOut:
+    portfolio = await _get_owned_portfolio(db, portfolio_id, str(user.id))
+    if payload.name is not None:
+        portfolio.name = payload.name
+    if payload.margin_limit is not None:
+        portfolio.margin_limit = payload.margin_limit
+    await db.commit()
+    await db.refresh(portfolio)
+
+    pos_count_q = await db.execute(select(func.count(Position.id)).where(Position.portfolio_id == portfolio.id))
+    pos_count = int(pos_count_q.scalar_one())
+    
+    latest_risk_q = await db.execute(
+        select(RiskComputation).where(RiskComputation.portfolio_id == portfolio.id).order_by(RiskComputation.computed_at.desc()).limit(1)
+    )
+    latest = latest_risk_q.scalar_one_or_none()
+    
+    return PortfolioOut(
+        portfolio_id=portfolio.id,
+        name=portfolio.name,
+        margin_limit=Decimal(portfolio.margin_limit),
+        positions_count=pos_count,
+        total_value=Decimal(latest.portfolio_value) if latest else Decimal("0"),
+        latest_risk={
+            "margin_status": latest.margin_status,
+            "var_95": float(latest.var_95),
+            "margin_utilization": float(latest.margin_utilization),
+        }
+        if latest
+        else None,
+    )
+
 
 
 @router.post("/{portfolio_id}/positions", response_model=PositionOut)
