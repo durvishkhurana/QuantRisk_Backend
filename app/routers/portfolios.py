@@ -30,6 +30,35 @@ async def _get_owned_portfolio(db: AsyncSession, portfolio_id: str, user_id: str
     return portfolio
 
 
+async def _latest_risk_map(db: AsyncSession, portfolio_ids: list) -> dict:
+    """Latest RiskComputation per portfolio in a single query (avoids N+1)."""
+    if not portfolio_ids:
+        return {}
+    rows = (
+        await db.execute(
+            select(RiskComputation)
+            .where(RiskComputation.portfolio_id.in_(portfolio_ids))
+            .order_by(RiskComputation.portfolio_id, RiskComputation.computed_at.desc())
+            .distinct(RiskComputation.portfolio_id)
+        )
+    ).scalars().all()
+    return {row.portfolio_id: row for row in rows}
+
+
+async def _position_count_map(db: AsyncSession, portfolio_ids: list) -> dict:
+    """Position count per portfolio in a single grouped query (avoids N+1)."""
+    if not portfolio_ids:
+        return {}
+    rows = (
+        await db.execute(
+            select(Position.portfolio_id, func.count(Position.id))
+            .where(Position.portfolio_id.in_(portfolio_ids))
+            .group_by(Position.portfolio_id)
+        )
+    ).all()
+    return {pid: count for pid, count in rows}
+
+
 @router.post("", response_model=PortfolioOut)
 async def create_portfolio(
     payload: PortfolioCreateIn,
@@ -56,6 +85,7 @@ async def aggregate_risk(
     user: User = Depends(get_current_user),
 ) -> AggregateRiskResponse:
     portfolios = (await db.execute(select(Portfolio).where(Portfolio.user_id == user.id, Portfolio.is_active.is_(True)))).scalars().all()
+    latest_map = await _latest_risk_map(db, [p.id for p in portfolios])
     breakdown: list[PortfolioRiskBreakdown] = []
     total_value = Decimal("0")
     individual_vars: list[float] = []
@@ -63,11 +93,7 @@ async def aggregate_risk(
     var_ratios: list[tuple] = []
 
     for p in portfolios:
-        latest = (
-            await db.execute(
-                select(RiskComputation).where(RiskComputation.portfolio_id == p.id).order_by(RiskComputation.computed_at.desc()).limit(1)
-            )
-        ).scalar_one_or_none()
+        latest = latest_map.get(p.id)
         value = Decimal(latest.portfolio_value) if latest else Decimal("0")
         var_95 = Decimal(latest.var_95) if latest else Decimal("0")
         status = latest.margin_status if latest else "OK"
@@ -304,14 +330,13 @@ async def delete_position(
 async def list_portfolios(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> list[PortfolioOut]:
     result = await db.execute(select(Portfolio).where(Portfolio.user_id == user.id).order_by(Portfolio.created_at.desc()))
     portfolios = result.scalars().all()
+    portfolio_ids = [p.id for p in portfolios]
+    count_map = await _position_count_map(db, portfolio_ids)
+    latest_map = await _latest_risk_map(db, portfolio_ids)
     out: list[PortfolioOut] = []
     for p in portfolios:
-        pos_count_q = await db.execute(select(func.count(Position.id)).where(Position.portfolio_id == p.id))
-        pos_count = int(pos_count_q.scalar_one())
-        latest_risk_q = await db.execute(
-            select(RiskComputation).where(RiskComputation.portfolio_id == p.id).order_by(RiskComputation.computed_at.desc()).limit(1)
-        )
-        latest = latest_risk_q.scalar_one_or_none()
+        pos_count = int(count_map.get(p.id, 0))
+        latest = latest_map.get(p.id)
         out.append(
             PortfolioOut(
                 portfolio_id=p.id,

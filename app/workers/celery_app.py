@@ -12,6 +12,7 @@ celery_app = Celery(
         "app.workers.price_worker",
         "app.workers.history_loader",
         "app.workers.shap_worker",
+        "app.workers.vol_worker",
     ],
 )
 

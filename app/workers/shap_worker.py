@@ -1,9 +1,10 @@
 import asyncio
 from decimal import Decimal
-import numpy as np
 from sqlalchemy import select
 from app.database import SessionLocal
 from app.models import Position, RiskComputation, ShapAttribution
+from app.services.market_data import get_last_snapshot_price
+from app.services.portfolio_service import compute_portfolio_value, compute_position_values, compute_weights
 from app.services.return_matrix import build_returns_matrix
 from app.services.shap_kernel import compute_kernel_shap
 from app.workers.celery_app import celery_app
@@ -31,17 +32,27 @@ async def _compute(risk_computation_id: str) -> dict:
         if returns.empty:
             return {"status": "no_returns"}
 
-        ordered_cols = [t for t in tickers if t in returns.columns]
-        if not ordered_cols:
+        # Use the same **market-value** weights as the inline linear attribution
+        # (value / portfolio_value), not quantity-normalized weights — otherwise
+        # the kernel and linear SHAP numbers disagree for the same computation.
+        ordered_positions = [p for p in positions if p.ticker in returns.columns]
+        if not ordered_positions:
             return {"status": "no_ordered_cols"}
-        scenarios = returns[ordered_cols].to_numpy()
-
-        qty = np.array([float(p.quantity) for p in positions[: len(ordered_cols)]], dtype=float)
-        qty = np.abs(qty)
-        if float(np.sum(qty)) == 0:
-            return {"status": "zero_qty"}
-        weights = qty / np.sum(qty)
-        contributions = compute_kernel_shap(scenarios, weights, Decimal(row.portfolio_value), positions[: len(ordered_cols)])
+        prices: dict[str, Decimal] = {}
+        for pos in ordered_positions:
+            snap = await get_last_snapshot_price(db, pos.ticker)
+            if snap is not None:
+                prices[pos.ticker] = snap
+        priced = [p for p in ordered_positions if p.ticker in prices]
+        if not priced:
+            return {"status": "no_prices"}
+        position_values = compute_position_values(priced, prices)
+        portfolio_value = compute_portfolio_value(position_values)
+        weights = compute_weights(priced, position_values, portfolio_value)
+        if weights.size == 0:
+            return {"status": "zero_value"}
+        scenarios = returns[[p.ticker for p in priced]].to_numpy()
+        contributions = compute_kernel_shap(scenarios, weights, Decimal(row.portfolio_value), priced)
 
         for ticker, val in contributions.items():
             pct = (Decimal(str(val)) / Decimal(row.var_95) * Decimal("100")) if Decimal(row.var_95) else Decimal("0")

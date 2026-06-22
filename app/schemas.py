@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 class ErrorResponse(BaseModel):
@@ -151,6 +151,9 @@ class BacktestSeriesPoint(BaseModel):
 
 
 class KupiecResult(BaseModel):
+    # "model_valid" collides with pydantic's protected "model_" namespace; opt out.
+    model_config = ConfigDict(protected_namespaces=())
+
     total_days: int
     expected_violations: float
     actual_violations: int
@@ -202,16 +205,6 @@ class RiskOut(BaseModel):
     risk_narrative: str | None = None
     vol_forecasts: list[VolForecastOut] | None = None
     adjusted_var_95_portfolio: float | None = None
-
-
-class MarginEventOut(BaseModel):
-    id: uuid.UUID
-    portfolio_id: uuid.UUID
-    event_type: str
-    triggered_at: datetime
-    var_95: Decimal
-    margin_limit: Decimal
-    margin_utilization: Decimal
 
 
 class AlertEventOut(BaseModel):

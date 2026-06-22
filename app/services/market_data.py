@@ -12,13 +12,8 @@ from app.middleware.metrics_middleware import CACHE_HIT_RATE, CACHE_MISS_RATE
 from app.services.redis_client import cache_get_json, cache_set_json
 
 
-async def get_latest_price(ticker: str) -> Decimal:
-    cached = await cache_get_json(f"price:{ticker}")
-    if cached and "price" in cached:
-        CACHE_HIT_RATE.labels("price").inc()
-        return Decimal(str(cached["price"]))
-    CACHE_MISS_RATE.labels("price").inc()
-
+def _fetch_price_blocking(ticker: str):
+    """Synchronous yfinance lookup — must be run off the event loop."""
     ticker_obj = yf.Ticker(ticker)
     try:
         price = ticker_obj.fast_info.get("lastPrice")
@@ -31,6 +26,19 @@ async def get_latest_price(ticker: str) -> Decimal:
                 price = hist["Close"].iloc[-1]
         except Exception:  # noqa: BLE001
             price = None
+    return price
+
+
+async def get_latest_price(ticker: str) -> Decimal:
+    cached = await cache_get_json(f"price:{ticker}")
+    if cached and "price" in cached:
+        CACHE_HIT_RATE.labels("price").inc()
+        return Decimal(str(cached["price"]))
+    CACHE_MISS_RATE.labels("price").inc()
+
+    # yfinance is blocking I/O; run it in a worker thread so it never stalls the
+    # event loop (this path is only hit on a cache miss).
+    price = await asyncio.to_thread(_fetch_price_blocking, ticker)
 
     if price is None and os.getenv("ALPHA_VANTAGE_KEY"):
         try:
@@ -64,15 +72,21 @@ async def get_latest_price_with_fallback(ticker: str, fallback: Decimal, *, time
         return fallback
 
 
+def _fetch_sector_blocking(ticker: str) -> str | None:
+    info = yf.Ticker(ticker).info or {}
+    return info.get("sector")
+
+
 async def get_sector(ticker: str) -> str | None:
     cached = await cache_get_json(f"sector:{ticker}")
     if cached and "sector" in cached:
         CACHE_HIT_RATE.labels("sector").inc()
         return cached["sector"]
     CACHE_MISS_RATE.labels("sector").inc()
-    ticker_obj = yf.Ticker(ticker)
-    info = ticker_obj.info or {}
-    sector = info.get("sector")
+    try:
+        sector = await asyncio.to_thread(_fetch_sector_blocking, ticker)
+    except Exception:  # noqa: BLE001
+        sector = None
     if sector:
         await cache_set_json(f"sector:{ticker}", {"sector": sector}, ttl_seconds=86400)
     return sector
@@ -83,7 +97,7 @@ async def backfill_history(session: AsyncSession, ticker: str, lookback_days: in
     if result.scalar_one_or_none():
         return
 
-    history = yf.download(ticker, period="1y", auto_adjust=False, progress=False)
+    history = await asyncio.to_thread(yf.download, ticker, period="1y", auto_adjust=False, progress=False)
     if history.empty:
         return
 

@@ -16,11 +16,7 @@ from app.services.shap_service import compute_shap_like_attribution
 from app.services.stress_engine import calculate_beta, run_stress_tests
 from app.services.correlation_service import compute_correlation_regime
 from app.services.var_engine import compute_monte_carlo_var, compute_var_cvar
-from app.services.volatility_forecaster import (
-    VolatilityForecaster,
-    forecast_is_fresh,
-)
-from app.services.forecast_store import get_latest_forecast, save_forecast
+from app.services.forecast_store import get_latest_forecasts_for_portfolio
 
 logger = logging.getLogger(__name__)
 
@@ -117,73 +113,31 @@ async def compute_portfolio_risk(session: AsyncSession, portfolio: Portfolio) ->
 
     correlation_json = compute_correlation_regime(asset_returns)
 
+    # Volatility forecasts are read-only here: the LSTM/GARCH training is done
+    # asynchronously by app.workers.vol_worker and persisted to the DB. The
+    # compute hot path only surfaces the most recent stored forecast per ticker,
+    # so heavy model training never blocks risk computation or the 60s beat.
     vol_forecasts: list[dict] = []
     adjusted_var_95_portfolio: float | None = None
-    vol_start = time.perf_counter()
     weight_by_ticker = {
         pos.ticker: float(weights[i]) if i < len(weights) else 0.0
         for i, pos in enumerate(positions)
         if pos.ticker in asset_returns.columns
     }
-    for pos in positions:
-        ticker = pos.ticker
-        if ticker not in returns.columns:
-            continue
-        try:
-            cached = await get_latest_forecast(session, portfolio.id, ticker)
-            if cached and forecast_is_fresh(cached.computed_at):
-                vol_forecasts.append(
-                    {
-                        "ticker": ticker,
-                        "predicted_vol": float(cached.predicted_vol),
-                        "garch_vol": float(cached.garch_vol),
-                        "lstm_mae": float(cached.lstm_mae),
-                        "garch_mae": float(cached.garch_mae),
-                        "improvement_pct": float(cached.improvement_pct) if cached.improvement_pct is not None else None,
-                        "vol_regime": cached.vol_regime,
-                        "adjusted_var_95": float(cached.adjusted_var_95) if cached.adjusted_var_95 is not None else None,
-                    }
-                )
-                continue
-            if time.perf_counter() - vol_start > 10:
-                logger.warning("vol_forecast_time_budget_exceeded", extra={"portfolio_id": str(portfolio.id)})
-                break
-            series = returns[ticker].dropna()
-            w = abs(weight_by_ticker.get(ticker, 0.0))
-            ticker_hist_var = float(var_95) * w
-            forecaster = VolatilityForecaster(series, ticker=ticker)
-            result = forecaster.evaluate_and_forecast(historical_var_95=ticker_hist_var)
-            m = result.metrics
-            await save_forecast(
-                session,
-                portfolio.id,
-                ticker,
-                m.predicted_vol,
-                m.garch_vol,
-                m.lstm_mae,
-                m.garch_mae,
-                m.lstm_rmse,
-                m.garch_rmse,
-                m.direction_accuracy,
-                m.vol_regime,
-                result.adjusted_var_95,
-            )
-            improvement = (m.garch_mae - m.lstm_mae) / m.garch_mae * 100.0 if m.garch_mae else None
-            vol_forecasts.append(
-                {
-                    "ticker": ticker,
-                    "predicted_vol": m.predicted_vol,
-                    "garch_vol": m.garch_vol,
-                    "lstm_mae": m.lstm_mae,
-                    "garch_mae": m.garch_mae,
-                    "improvement_pct": improvement,
-                    "vol_regime": m.vol_regime,
-                    "adjusted_var_95": result.adjusted_var_95,
-                }
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("vol_forecast_failed", extra={"ticker": ticker, "error": str(exc)})
-            continue
+    cached_forecasts = await get_latest_forecasts_for_portfolio(session, portfolio.id)
+    for fc in cached_forecasts:
+        vol_forecasts.append(
+            {
+                "ticker": fc.ticker,
+                "predicted_vol": float(fc.predicted_vol),
+                "garch_vol": float(fc.garch_vol),
+                "lstm_mae": float(fc.lstm_mae),
+                "garch_mae": float(fc.garch_mae),
+                "improvement_pct": float(fc.improvement_pct) if fc.improvement_pct is not None else None,
+                "vol_regime": fc.vol_regime,
+                "adjusted_var_95": float(fc.adjusted_var_95) if fc.adjusted_var_95 is not None else None,
+            }
+        )
 
     if vol_forecasts:
         total_w = sum(abs(weight_by_ticker.get(v["ticker"], 0.0)) for v in vol_forecasts)

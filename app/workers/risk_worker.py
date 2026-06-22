@@ -7,8 +7,12 @@ from sqlalchemy import select
 from app.database import SessionLocal
 from app.middleware.metrics_middleware import MARGIN_BREACH_COUNT, RISK_COMPUTATION_COUNT, RISK_COMPUTATION_LATENCY
 from app.models import Portfolio, RiskComputation
-from app.routers.risk import _get_shap_map_for_row, _map_risk_row_from_shap, _persist_computation
 from app.services.nlp_report_service import generate_risk_narrative
+from app.services.risk_pipeline import (
+    get_shap_map_for_row as _get_shap_map_for_row,
+    map_risk_row_from_shap as _map_risk_row_from_shap,
+    persist_computation as _persist_computation,
+)
 from app.workers.celery_app import celery_app
 
 

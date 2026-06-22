@@ -96,7 +96,12 @@ async def test_get_portfolio_risk(client: AsyncClient, portfolio_with_position: 
     user_id = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])["user_id"]
     await _run_task(task_id, portfolio_id, user_id)
 
-    task = await client.get(f"/tasks/{task_id}")
+    # Task status is owner-scoped: unauthenticated access is rejected...
+    unauth = await client.get(f"/tasks/{task_id}")
+    assert unauth.status_code in (401, 403)
+
+    # ...and the owner sees their result.
+    task = await client.get(f"/tasks/{task_id}", headers=auth_headers)
     assert task.status_code == 200
     assert task.json()["status"] == "SUCCESS", task.json()
 

@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -8,8 +10,15 @@ from prometheus_client import make_asgi_app
 from app.middleware.metrics_middleware import MetricsMiddleware
 from app.routers import alerts, auth, portfolios, risk, websocket
 
+logger = logging.getLogger(__name__)
+
 settings = get_settings()
 app = FastAPI(title=settings.app_name, docs_url="/api/docs", redoc_url="/api/redoc", openapi_url="/api/openapi.json")
+
+# Only echo raw exception text to clients outside production, where it aids local
+# debugging. In production we log the detail server-side and return a generic
+# message so internal errors / SQL aren't leaked to callers.
+_expose_errors = settings.environment.lower() != "production"
 
 _allowed_origins = settings.cors_origins()
 
@@ -36,15 +45,23 @@ async def ensure_cors_on_error_responses(request: Request, call_next):
 
 @app.on_event("startup")
 async def startup() -> None:
+    # In production, Alembic migrations are the single source of truth for the
+    # schema (`alembic upgrade head` on deploy). Running create_all there would
+    # risk ORM/migration drift, so it's limited to dev/test convenience.
+    if settings.environment.lower() == "production":
+        logger.info("startup: skipping create_all (Alembic owns the schema in production)")
+        return
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
 
 @app.exception_handler(SQLAlchemyError)
 async def db_exception_handler(_: Request, exc: SQLAlchemyError) -> JSONResponse:
+    logger.exception("database_error")
+    message = str(exc) if _expose_errors else "A database error occurred."
     return JSONResponse(
         status_code=500,
-        content={"error": "DATABASE_ERROR", "message": str(exc), "status": 500},
+        content={"error": "DATABASE_ERROR", "message": message, "status": 500},
     )
 
 
@@ -59,9 +76,11 @@ async def http_exception_handler(_: Request, exc: HTTPException) -> JSONResponse
 
 @app.exception_handler(Exception)
 async def generic_exception_handler(_: Request, exc: Exception) -> JSONResponse:
+    logger.exception("internal_error")
+    message = str(exc) if _expose_errors else "An internal error occurred."
     return JSONResponse(
         status_code=500,
-        content={"error": "INTERNAL_ERROR", "message": str(exc), "status": 500},
+        content={"error": "INTERNAL_ERROR", "message": message, "status": 500},
     )
 
 

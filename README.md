@@ -2,18 +2,24 @@
 
 FastAPI service that ingests equity positions, computes portfolio risk on a schedule, persists audit-friendly history, and exposes REST, WebSocket, and Prometheus metrics.
 
+> This is its **own git repository**, deployed independently to Render. The sibling
+> `frontend/` is a separate repo (Vercel). There is no root-level monorepo.
+
 ## Features
 
 - JWT authentication and user-scoped portfolio CRUD
 - Historical simulation VaR (95% / 99%) and CVaR on a 252-day lookback
 - Stress tests (mild / moderate / severe) with OLS betas vs SPY
-- Monte Carlo simulation (10k paths), correlation regime detection, Markowitz-style optimizer
+- Monte Carlo simulation (10k paths via historical bootstrap), correlation regime detection, Markowitz-style optimizer
+- Per-ticker LSTM-vs-GARCH volatility forecasting, trained asynchronously off the hot path
 - Margin utilization vs per-portfolio limits with WARNING / BREACH events
 - Append-only `risk_computations` and `margin_events` for time-travel queries
-- Celery workers for scheduled recomputation (~60s), price backfill, async SHAP kernel attribution, optional risk narrative
-- Alerts via REST (filter, paginate, CSV export, acknowledge) and WebSocket with Redis Streams replay (`?since=`)
+- Celery workers for scheduled recomputation (~60s), price backfill, async SHAP kernel attribution, async volatility training, optional risk narrative
+- Alerts via REST (filter, paginate, CSV export, acknowledge) and JWT-authenticated WebSocket with Redis Streams replay (`?since=&token=`)
 - Kupiec VaR backtest when sufficient history exists
-- Market data via yfinance with Redis caching; optional Alpha Vantage
+- Market data via yfinance (run off the event loop) with Redis caching; optional Alpha Vantage
+
+The 60s scheduler (`compute_all_portfolios`) recomputes active portfolios sequentially; this is adequate by design because the heavy work (model training, kernel SHAP, narrative) runs in separate Celery tasks, keeping each portfolio's synchronous step small.
 
 ## Stack
 
@@ -74,15 +80,33 @@ celery -A app.workers.celery_app.celery_app beat --loglevel=info
 
 ## Testing
 
-Use a dedicated test database and Redis DB index. GitHub Actions supplies CI defaults in `.github/workflows/test.yml`.
+> ⚠️ **Never run the test suite against the production database.** `tests/conftest.py`
+> runs `TRUNCATE users RESTART IDENTITY CASCADE` on setup — pointing it at the live
+> Supabase URL would wipe all real data. Use a **dedicated, throwaway test database**
+> and a separate Redis index. Note that `config.py` overrides `DATABASE_URL` with
+> `SUPABASE_DATABASE_URL` when the latter is set, so **unset `SUPABASE_DATABASE_URL`**
+> (and any prod `.env`) before running tests.
+
+Test layers:
+
+- **Unit / engine tests** (`test_engines.py`, `test_var_engine.py`) need no DB or Redis.
+- **Integration tests** (`test_api.py`) require a live Postgres + Redis.
+
+GitHub Actions supplies isolated CI services in `.github/workflows/test.yml`.
 
 Locally:
 
 ```bash
 pip install -r requirements.txt
-# Set DATABASE_URL, REDIS_URL, JWT_SECRET_KEY in .env or your shell (see tests/conftest.py)
+# Point at a DISPOSABLE test DB/Redis — not production:
+export DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/quantrisk_test
+export REDIS_URL=redis://localhost:6379/15
+unset SUPABASE_DATABASE_URL
+export JWT_SECRET_KEY=pytest-secret
 alembic upgrade head
-pytest -q
+
+pytest -q                                   # full suite (needs DB + Redis)
+pytest -q tests/test_engines.py tests/test_var_engine.py   # unit only, no infra
 ```
 
 ## Deployment

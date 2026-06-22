@@ -22,18 +22,28 @@ def compute_monte_carlo_var(
     n_simulations: int = 10000,
     horizon_days: int = 1,
 ) -> MonteCarloResult:
-    np.random.seed(42)
+    """Historical bootstrap Monte Carlo VaR.
+
+    Rather than sampling from a multivariate normal (which is symmetric and
+    thin-tailed — making the reported skewness/kurtosis meaningless), we resample
+    whole historical return vectors with replacement. This preserves the empirical
+    cross-asset correlation structure *and* the fat tails / asymmetry of real
+    returns, so the skew/kurtosis outputs carry signal. A multi-day horizon sums
+    that many bootstrapped daily vectors per path.
+    """
     if returns_matrix.ndim != 2 or returns_matrix.shape[0] < 2:
         raise ValueError("returns_matrix must be 2D with at least 2 rows")
 
-    mu = np.mean(returns_matrix, axis=0)
-    cov = np.cov(returns_matrix, rowvar=False)
-    if cov.ndim == 0:
-        cov = np.array([[float(cov)]])
-    simulated = np.random.multivariate_normal(mu, cov, n_simulations)
-    if horizon_days != 1:
-        simulated = simulated * np.sqrt(horizon_days)
-    sim_portfolio = simulated @ weights
+    rng = np.random.default_rng(42)
+    n_obs = returns_matrix.shape[0]
+    horizon = max(1, int(horizon_days))
+    if horizon == 1:
+        sampled = returns_matrix[rng.integers(0, n_obs, size=n_simulations)]
+        sim_portfolio = sampled @ weights
+    else:
+        idx = rng.integers(0, n_obs, size=(n_simulations, horizon))
+        sampled = returns_matrix[idx]  # (n_simulations, horizon, n_assets)
+        sim_portfolio = (sampled @ weights).sum(axis=1)
 
     q95 = float(np.quantile(sim_portfolio, 0.05))
     q99 = float(np.quantile(sim_portfolio, 0.01))

@@ -94,30 +94,13 @@ def market_mocks(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("app.services.market_data.yf.download", _fake_download)
     monkeypatch.setattr("app.services.redis_client.publish_json", _noop_publish)
     monkeypatch.setattr("app.services.alerts.socket_manager.broadcast", _noop_broadcast)
+    # All modules share the same Celery instance, so patching send_task on the
+    # canonical object disables task dispatch everywhere (risk_pipeline, portfolios, …).
     monkeypatch.setattr("app.workers.celery_app.celery_app.send_task", _noop_send_task)
-    monkeypatch.setattr("app.routers.portfolios.celery_app.send_task", _noop_send_task)
-    monkeypatch.setattr("app.routers.risk.celery_app.send_task", _noop_send_task)
-
-    class _FastVolForecaster:
-        def __init__(self, *_args, **_kwargs) -> None:
-            pass
-
-        def evaluate_and_forecast(self, historical_var_95: float = 0.0):
-            from types import SimpleNamespace
-
-            metrics = SimpleNamespace(
-                predicted_vol=0.2,
-                garch_vol=0.21,
-                lstm_mae=0.01,
-                garch_mae=0.02,
-                lstm_rmse=0.01,
-                garch_rmse=0.02,
-                direction_accuracy=0.55,
-                vol_regime="NORMAL",
-            )
-            return SimpleNamespace(metrics=metrics, adjusted_var_95=historical_var_95)
-
-    monkeypatch.setattr("app.services.risk.VolatilityForecaster", _FastVolForecaster)
+    # Volatility model training now runs only in app.workers.vol_worker (async),
+    # never in the sync compute path — so there is nothing to stub here. With no
+    # worker running under test, the risk pipeline simply reads zero stored
+    # forecasts and returns vol_forecasts=None.
 
 
 @pytest.fixture

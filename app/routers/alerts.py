@@ -283,25 +283,26 @@ async def list_alerts(
 
 @router.get("/summary")
 async def alerts_summary(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> list[dict]:
-    portfolios = (await db.execute(select(Portfolio).where(Portfolio.user_id == user.id))).scalars().all()
-    summary: list[dict] = []
-    for p in portfolios:
-        event = (
-            await db.execute(
-                select(MarginEvent).where(MarginEvent.portfolio_id == p.id).order_by(MarginEvent.triggered_at.desc()).limit(1)
-            )
-        ).scalar_one_or_none()
-        if event:
-            summary.append(
-                {
-                    "portfolio_id": str(p.id),
-                    "portfolio_name": p.name,
-                    "event_type": event.event_type,
-                    "triggered_at": event.triggered_at,
-                    "utilization": float(event.margin_utilization),
-                }
-            )
-    return summary
+    # Latest event per portfolio for this user in one query (DISTINCT ON avoids N+1).
+    rows = (
+        await db.execute(
+            select(MarginEvent, Portfolio.name)
+            .join(Portfolio, Portfolio.id == MarginEvent.portfolio_id)
+            .where(Portfolio.user_id == user.id)
+            .order_by(MarginEvent.portfolio_id, MarginEvent.triggered_at.desc())
+            .distinct(MarginEvent.portfolio_id)
+        )
+    ).all()
+    return [
+        {
+            "portfolio_id": str(event.portfolio_id),
+            "portfolio_name": portfolio_name,
+            "event_type": event.event_type,
+            "triggered_at": event.triggered_at,
+            "utilization": float(event.margin_utilization),
+        }
+        for event, portfolio_name in rows
+    ]
 
 
 @router.get("/portfolios/{portfolio_id}")
