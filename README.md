@@ -1,163 +1,140 @@
-# QuantRisk Backend
+<div align="center">
 
-FastAPI service that ingests equity positions, computes portfolio risk on a schedule, persists audit-friendly history, and exposes REST, WebSocket, and Prometheus metrics.
+# QuantRisk Engine — Backend
 
-> This is its **own git repository**, deployed independently to Render. The sibling
-> `frontend/` is a separate repo (Vercel). There is no root-level monorepo.
+**Institutional‑style portfolio risk computation service.**
+VaR · CVaR · Monte Carlo · Stress Testing · SHAP Attribution · LSTM/GARCH Volatility · Margin Alerts
+
+[![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.0-CA2C2C)](https://www.sqlalchemy.org/)
+[![Celery](https://img.shields.io/badge/Celery-5.4-37814A?logo=celery&logoColor=white)](https://docs.celeryq.dev/)
+[![Postgres](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![Redis](https://img.shields.io/badge/Redis-7-DC382D?logo=redis&logoColor=white)](https://redis.io/)
+
+</div>
+
+---
+
+## Overview
+
+QuantRisk Engine is a FastAPI service that ingests equity portfolios, continuously
+computes a battery of risk metrics, stores an **append‑only** audit history, and pushes
+real‑time alerts over JWT‑authenticated WebSockets. CPU‑heavy work (kernel SHAP,
+LSTM/GARCH training, AI narrative) runs in **Celery** workers, keeping the API fast.
+
+It is a **risk measurement** service, not a trading platform — it never places orders
+or moves money. Frontend lives in a separate repo: **[QuantRisk_Frontend](https://github.com/durvishkhurana/QuantRisk_Frontend)**.
+
+**Live API:** https://quantrisk-backend.onrender.com · **Docs:** `/api/docs`
 
 ## Features
 
-- JWT authentication and user-scoped portfolio CRUD
-- Historical simulation VaR (95% / 99%) and CVaR on a 252-day lookback
-- Stress tests (mild / moderate / severe) with OLS betas vs SPY
-- Monte Carlo simulation (10k paths via historical bootstrap), correlation regime detection, Markowitz-style optimizer
-- Per-ticker LSTM-vs-GARCH volatility forecasting, trained asynchronously off the hot path
-- Margin utilization vs per-portfolio limits with WARNING / BREACH events
-- Append-only `risk_computations` and `margin_events` for time-travel queries
-- Celery workers for scheduled recomputation (~60s), price backfill, async SHAP kernel attribution, async volatility training, optional risk narrative
-- Alerts via REST (filter, paginate, CSV export, acknowledge) and JWT-authenticated WebSocket with Redis Streams replay (`?since=&token=`)
-- Kupiec VaR backtest when sufficient history exists
-- Market data via yfinance (run off the event loop) with Redis caching; optional Alpha Vantage
+- **JWT auth** (HS256) with bcrypt password hashing; user‑scoped portfolio & position CRUD
+- **Historical‑simulation VaR** (95% / 99%) and **CVaR** on a 252‑day lookback
+- **Monte Carlo VaR** via historical bootstrap (preserves correlation, skew, fat tails)
+- **Stress tests** (mild/moderate/severe) using OLS betas vs SPY
+- **Risk attribution** — fast linear inline + async **SHAP KernelExplainer**
+- **Volatility forecasting** — per‑ticker **LSTM vs GARCH(1,1)**, trained asynchronously
+- **Correlation‑regime** detection, **Markowitz optimizer**, **Kupiec** VaR backtest
+- **Margin** utilization vs per‑portfolio limit → WARNING / BREACH events
+- **Append‑only** `risk_computations` & `margin_events` for time‑travel queries
+- **Real‑time** alerts over WebSocket backed by **Redis Streams** (`?since=` replay)
+- **Observability** — Prometheus metrics at `/metrics`
 
-The 60s scheduler (`compute_all_portfolios`) recomputes active portfolios sequentially; this is adequate by design because the heavy work (model training, kernel SHAP, narrative) runs in separate Celery tasks, keeping each portfolio's synchronous step small.
+## Tech stack
 
-## Stack
+FastAPI · Uvicorn · SQLAlchemy 2 (async) · asyncpg · Alembic · Pydantic v2 ·
+Celery · Redis · NumPy · Pandas · SciPy · scikit‑learn · SHAP · PyTorch (LSTM) ·
+arch (GARCH) · yfinance · python‑jose · bcrypt · prometheus‑client · pytest.
 
-| Layer | Technology |
-|-------|------------|
-| API | FastAPI, Pydantic v2, SQLAlchemy async |
-| Auth | JWT (python-jose), bcrypt |
-| Database | PostgreSQL 16 (TimescaleDB optional for hypertables) |
-| Queue / cache | Redis 7, Celery 5 |
-| Compute | NumPy, Pandas, SciPy, scikit-learn, SHAP |
+## Architecture
 
-## Prerequisites
+```
+routers/ ─┐
+          ├─► services/risk_pipeline.py ─► services/risk.py + engines
+workers/ ─┘        (persistence + serialization; routers & workers depend downward)
 
-- Python 3.12+
-- PostgreSQL 16+
-- Redis 7+
-
-## Configuration
-
-**Do not commit `.env` or paste secrets into documentation.**
-
-1. Copy `.env.example` to `.env`.
-2. Fill in your own values for database, Redis, JWT secret, and CORS origins.
-3. Never commit API keys (`ALPHA_VANTAGE_KEY`, `ANTHROPIC_API_KEY`) to the repository.
-
-**Risk narrative:** With `ANTHROPIC_API_KEY` on Render, summaries use Claude Haiku. Without it, the API builds a rule-based narrative from VaR, SHAP, and stress metrics (no xAI/Grok integration).
-
-| Variable | Purpose |
-|----------|---------|
-| `DATABASE_URL` | Async Postgres (or set `SUPABASE_DATABASE_URL` for Supabase) |
-| `SUPABASE_DATABASE_URL` | Overrides `DATABASE_URL`. On **Render/Vercel**, use Supabase **connection pooler** (port **6543**), not direct `db.*.supabase.co:5432`. |
-| `SUPABASE_SECRET_KEY` | Supabase secret key (Render env only, never frontend) |
-| `REDIS_URL` | Redis connection |
-| `JWT_SECRET_KEY` | Long random signing secret |
-| `CELERY_BROKER_URL` / `CELERY_RESULT_BACKEND` | Celery broker and result backend |
-| `FRONTEND_URLS` | Comma-separated allowed browser origins (CORS) |
-
-Render-managed Postgres URLs using `postgresql://` are normalized to `postgresql+asyncpg://` in application settings.
-
-## Local development
-
-```bash
-pip install -r requirements.txt
-alembic upgrade head
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+PostgreSQL (append-only history) · Redis (cache, task state, alert streams)
+External: yfinance · Alpha Vantage (opt) · Anthropic (opt)
 ```
 
-In separate terminals:
+- **Sync (request / 60s beat):** VaR, CVaR, bootstrap MC, stress, correlation, linear SHAP, margin.
+- **Async (Celery):** kernel SHAP, LSTM/GARCH training, AI narrative.
+- **Schema:** Alembic owns it in production; `create_all` runs only outside prod.
 
-```bash
-celery -A app.workers.celery_app.celery_app worker --loglevel=info
-celery -A app.workers.celery_app.celery_app beat --loglevel=info
-```
-
-- OpenAPI: `http://localhost:8000/api/docs`
-- Health: `http://localhost:8000/health`
-- Metrics: `http://localhost:8000/metrics`
-
-## Testing
-
-> ⚠️ **Never run the test suite against the production database.** `tests/conftest.py`
-> runs `TRUNCATE users RESTART IDENTITY CASCADE` on setup — pointing it at the live
-> Supabase URL would wipe all real data. Use a **dedicated, throwaway test database**
-> and a separate Redis index. Note that `config.py` overrides `DATABASE_URL` with
-> `SUPABASE_DATABASE_URL` when the latter is set, so **unset `SUPABASE_DATABASE_URL`**
-> (and any prod `.env`) before running tests.
-
-Test layers:
-
-- **Unit / engine tests** (`test_engines.py`, `test_var_engine.py`) need no DB or Redis.
-- **Integration tests** (`test_api.py`) require a live Postgres + Redis.
-
-GitHub Actions supplies isolated CI services in `.github/workflows/test.yml`.
-
-Locally:
-
-```bash
-pip install -r requirements.txt
-# Point at a DISPOSABLE test DB/Redis — not production:
-export DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/quantrisk_test
-export REDIS_URL=redis://localhost:6379/15
-unset SUPABASE_DATABASE_URL
-export JWT_SECRET_KEY=pytest-secret
-alembic upgrade head
-
-pytest -q                                   # full suite (needs DB + Redis)
-pytest -q tests/test_engines.py tests/test_var_engine.py   # unit only, no infra
-```
-
-## Deployment
-
-**Render (backend):** New → Web Service → connect this repo.
-
-**Python version:** Render defaults to 3.14, which breaks pinned `pandas`/`numpy` builds. Set **Environment → `PYTHON_VERSION`** = `3.12.12` (or rely on repo `.python-version` = `3.12`).
-
-**Start command:**
-
-```bash
-PYTHONPATH=. alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
-```
-
-**Build command:** `pip install -r requirements.txt`
-
-**Supabase Postgres instead of Render DB:** set `SUPABASE_DATABASE_URL` on all backend services.
-
-**Render + Supabase:** In [Supabase](https://supabase.com/dashboard) → **Project Settings → Database → Connection string**, choose **URI** and turn on **Use connection pooling** (Session mode, port **6543**). Paste that into `SUPABASE_DATABASE_URL` on Render. The direct host `db.<ref>.supabase.co:5432` often fails from Render with `Network is unreachable` (IPv6). URL-encode special characters in the password (e.g. `.` → `%2E`).
-
-Keep **Upstash** (or Render) Redis for Celery.
-
-**Vercel (frontend):** import the frontend repo; set `VITE_API_URL` to the Render API URL; set `NEXT_PUBLIC_SUPABASE_*` if using the Supabase client.
-
-On the API service set `FRONTEND_URL` and `FRONTEND_URLS` to your Vercel origin.
-
-Seed data (after DB is reachable):
-
-```bash
-python -m alembic upgrade head
-python scripts/seed_test_data.py
-python scripts/seed_database_full.py   # prices, risk rows, and full tester showcase
-```
-
-Test logins: `demo@quantrisk.com` / `QuantRisk2025!`, `analyst@quantrisk.com` / `Analyst2025!`, `tester@quantrisk.com` / `Tester2025!` (five portfolios after full seed).
-
-## Project layout
+## Project structure
 
 ```
 app/
-  main.py          # FastAPI app, CORS, metrics
-  routers/         # auth, portfolios, risk, alerts, websocket
-  services/        # VaR, stress, margin, market data, optimizer, …
-  workers/         # Celery tasks (risk, prices, SHAP)
-alembic/           # Schema migrations
-tests/             # pytest suite
-scripts/           # benchmarks, demo seeding
+├── main.py            # app, CORS, error handlers, /health, /metrics
+├── config.py          # typed settings (env/.env, Supabase/Upstash normalization)
+├── database.py        # async engine + session
+├── models.py          # 8 ORM tables
+├── schemas.py         # Pydantic I/O
+├── auth.py            # JWT + password hashing
+├── task_state.py      # owner-scoped Redis task status
+├── middleware/        # Prometheus metrics
+├── routers/           # auth, portfolios, risk, alerts, websocket
+├── services/          # risk pipeline + engines (var, stress, shap, vol, optimizer, …)
+└── workers/           # celery_app + risk/price/history/shap/vol tasks
+alembic/versions/      # 001–006, 010 (Timescale), 011 (vol forecasts)
+tests/                 # unit (no infra) + integration (needs Postgres+Redis)
 ```
 
-## Scope and limitations
+## Quick start
 
-- Equity cash positions only (no derivatives or fixed income)
-- Authorization enforced in application code (no PostgreSQL RLS)
-- Kupiec backtest needs at least 30 days of stored risk history
+Requires PostgreSQL and Redis (local or cloud).
+
+```bash
+cp .env.example .env          # set DATABASE_URL, REDIS_URL, JWT_SECRET_KEY, FRONTEND_URLS
+pip install -r requirements.txt
+alembic upgrade head
+uvicorn app.main:app --reload --port 8000
+```
+
+Workers (separate terminals):
+
+```bash
+celery -A app.workers.celery_app.celery_app worker --loglevel=info
+celery -A app.workers.celery_app.celery_app beat   --loglevel=info
+```
+
+- API docs: http://localhost:8000/api/docs · Health: `/health` · Metrics: `/metrics`
+
+## Configuration
+
+Key env vars: `DATABASE_URL` (or `SUPABASE_DATABASE_URL`, which overrides) ·
+`REDIS_URL` (or `UPSTASH_REDIS_REST_URL`/`_TOKEN`) · `CELERY_BROKER_URL` /
+`CELERY_RESULT_BACKEND` · `JWT_SECRET_KEY` · `FRONTEND_URL` / `FRONTEND_URLS` (CORS) ·
+`ENVIRONMENT` (`production` gates `create_all` and error verbosity) · optional
+`ALPHA_VANTAGE_KEY`, `ANTHROPIC_API_KEY`. See `.env.example`. **Never commit `.env`.**
+
+## API summary
+
+`POST /auth/{register,login}` · `GET/POST /portfolios` · `GET /portfolios/aggregate` ·
+`PATCH/DELETE /portfolios/{id}` · `.../positions` CRUD · `GET /portfolios/{id}/risk`
+(+ `/history`, `/volatility-forecast`, `/optimize`, `/correlation`, `/backtest`) ·
+`POST .../risk/compute` · `GET /tasks/{id}` (owner‑scoped) · `GET /alerts` (+ summary,
+detail, csv, acknowledge) · `WS /ws/portfolios/{id}?since=&token=` · `/health` · `/metrics`.
+
+## Testing
+
+```bash
+pytest -q tests/test_engines.py tests/test_var_engine.py   # unit only, no infra
+pytest -q                                                  # full suite (needs Postgres + Redis)
+```
+
+> ⚠️ **Never run the suite against production.** `conftest.py` runs
+> `TRUNCATE users ... CASCADE`. Point at a disposable test DB and **unset
+> `SUPABASE_DATABASE_URL`** first (it overrides `DATABASE_URL`).
+
+## Deployment (Render, no Docker)
+
+Render Blueprint from `render.yaml` → API web service + Celery worker + beat. Start
+command runs `alembic upgrade head` then Uvicorn; Render's `postgresql://` URL is
+auto‑normalized to `postgresql+asyncpg://`. Set `FRONTEND_URLS` for CORS.
+
+## License
+
+Educational / portfolio project by Durvish Khurana.
